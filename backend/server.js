@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import axios from 'axios'
 import https from 'https'
+import dns from 'dns/promises'
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -15,14 +16,40 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT || 4000
 const HISTORY_FILE = path.join(__dirname, 'history.json')
 
-const GROK_KEY = process.env.GROK_API_KEY
-const GEMINI_KEY = process.env.GEMINI_API_KEY
-const VT_KEY = process.env.VIRUSTOTAL_API_KEY
+const GROK_KEY    = process.env.GROK_API_KEY
+const GEMINI_KEY  = process.env.GEMINI_API_KEY
+const VT_KEY      = process.env.VIRUSTOTAL_API_KEY
 const URLSCAN_KEY = process.env.URLSCAN_API_KEY
+const GSB_KEY     = process.env.GOOGLE_SAFE_BROWSING_API_KEY
 
 const app = express()
 app.use(cors())
 app.use(express.json())
+
+// ── RATE LIMITING ─────────────────────────────────────────
+const scanCounts = new Map()
+function rateLimit(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress
+  const now = Date.now()
+  const entry = scanCounts.get(ip) || { count: 0, reset: now + 60000 }
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60000 }
+  entry.count++
+  scanCounts.set(ip, entry)
+  if (entry.count > 20) return res.status(429).json({ error: 'Rate limit exceeded. Max 20 scans/minute.' })
+  next()
+}
+
+// ── INPUT VALIDATION ─────────────────────────────────────
+function validateTarget(target) {
+  if (!target || typeof target !== 'string') return false
+  const t = target.trim()
+  if (t.length > 2048) return false
+  try {
+    const url = /^https?:\/\//i.test(t) ? t : `https://${t}`
+    new URL(url)
+    return true
+  } catch { return false }
+}
 
 // ── THREAT INTEL SOURCES ──────────────────────────────────
 
@@ -124,6 +151,68 @@ async function checkURLScan(url) {
   } catch {
     return null
   }
+}
+
+async function checkGoogleSafeBrowsing(url) {
+  if (!GSB_KEY) return null
+  try {
+    const res = await axios.post(
+      `https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${GSB_KEY}`,
+      {
+        client: { clientId: 'cyberscan', clientVersion: '2.0' },
+        threatInfo: {
+          threatTypes: ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE', 'POTENTIALLY_HARMFUL_APPLICATION'],
+          platformTypes: ['ANY_PLATFORM'],
+          threatEntryTypes: ['URL'],
+          threatEntries: [{ url }],
+        },
+      },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 8000 }
+    )
+    const matches = res.data?.matches || []
+    if (matches.length > 0) {
+      return {
+        flagged: true,
+        threats: matches.map(m => ({ type: m.threatType, platform: m.platformType })),
+      }
+    }
+    return { flagged: false }
+  } catch { return null }
+}
+
+async function checkPhishTank(url) {
+  try {
+    const res = await axios.post(
+      'https://checkurl.phishtank.com/checkurl/',
+      new URLSearchParams({ url, format: 'json', app_key: '' }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'phishtank/cyberscan' }, timeout: 8000 }
+    )
+    const d = res.data?.results
+    if (d?.in_database && d?.valid) {
+      return { phish: true, verified: d.verified, phishId: d.phish_id, detail: d.phish_detail_page }
+    }
+    return { phish: false }
+  } catch { return null }
+}
+
+async function checkDomainAge(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, '')
+    // Use RDAP (free, no key needed)
+    const tld = hostname.split('.').slice(-1)[0]
+    const rdapRes = await axios.get(
+      `https://rdap.org/domain/${hostname}`,
+      { timeout: 6000, headers: { Accept: 'application/json' } }
+    )
+    const events = rdapRes.data?.events || []
+    const reg = events.find(e => e.eventAction === 'registration')
+    const regDate = reg ? new Date(reg.eventDate) : null
+    const agedays = regDate ? Math.floor((Date.now() - regDate) / 86400000) : null
+    // Also resolve IP
+    let ip = null
+    try { const addrs = await dns.resolve4(hostname); ip = addrs[0] } catch {}
+    return { registered: regDate?.toISOString() || null, ageDays: agedays, hostname, ip }
+  } catch { return null }
 }
 
 async function checkSSL(url) {
@@ -230,6 +319,7 @@ function analyzeURLPatterns(url) {
 
 async function getAIAnalysis(url, threats, evidence) {
   const threatSummary = threats.map(t => `[${t.severity.toUpperCase()}] ${t.name}: ${t.description}`).join('\n')
+  const domainInfo = evidence.domain ? `Domain age: ${evidence.domain.ageDays ?? 'unknown'} days, IP: ${evidence.domain.ip || 'unknown'}` : 'Not checked'
   const prompt = `You are CYBERSCAN AI, an elite cybersecurity analyst. Analyze this URL threat scan result and provide a concise security assessment.
 
 URL: ${url}
@@ -237,8 +327,11 @@ Threats Found: ${threats.length}
 ${threatSummary || 'No threats detected by automated scanners.'}
 
 SSL: ${evidence.ssl ? `Valid=${evidence.ssl.valid}, Issuer=${evidence.ssl.issuer}, Days Left=${evidence.ssl.daysLeft}` : 'Not checked'}
-URLhaus: ${evidence.urlhaus ? JSON.stringify(evidence.urlhaus) : 'Not listed'}
+URLhaus: ${evidence.urlhaus?.listed ? 'LISTED as malware' : 'Not listed'}
 VirusTotal: ${evidence.virustotal ? `${evidence.virustotal.ratio} engines flagged` : 'Not checked'}
+Google Safe Browsing: ${evidence.gsb?.flagged ? 'FLAGGED' : 'Clean'}
+PhishTank: ${evidence.phishtank?.phish ? 'CONFIRMED PHISHING' : 'Not listed'}
+${domainInfo}
 
 Provide:
 1. Overall verdict (2 sentences max)
@@ -347,11 +440,14 @@ async function performScan(target) {
   }
 
   // Run all checks in parallel
-  const [urlhausResult, vtResult, urlscanResult, sslResult] = await Promise.all([
+  const [urlhausResult, vtResult, urlscanResult, sslResult, gsbResult, phishResult, domainResult] = await Promise.all([
     checkURLhaus(url),
     checkVirusTotal(url),
     checkURLScan(url),
     checkSSL(url),
+    checkGoogleSafeBrowsing(url),
+    checkPhishTank(url),
+    checkDomainAge(url),
   ])
 
   const patternFindings = analyzeURLPatterns(url)
@@ -438,6 +534,62 @@ async function performScan(target) {
     }
   }
 
+  // Google Safe Browsing findings
+  if (gsbResult?.flagged) {
+    const types = gsbResult.threats.map(t => t.type).join(', ')
+    threats.push({
+      id: `T-${Math.random().toString(36).slice(2, 8)}`,
+      name: 'Google Safe Browsing Alert',
+      severity: 'critical',
+      score: 9.5,
+      source: 'Google Safe Browsing',
+      description: `Google Safe Browsing flagged this URL. Threat types: ${types}.`,
+      owasp: 'A09:2021 – Security Logging and Monitoring Failures',
+      recommendation: 'This URL is actively blocked by Google. Do not visit.',
+    })
+  }
+
+  // PhishTank findings
+  if (phishResult?.phish) {
+    threats.push({
+      id: `T-${Math.random().toString(36).slice(2, 8)}`,
+      name: 'Known Phishing Site (PhishTank)',
+      severity: 'critical',
+      score: 9.6,
+      source: 'PhishTank',
+      description: `Confirmed phishing site in PhishTank database. ID: ${phishResult.phishId}. Verified: ${phishResult.verified}.`,
+      owasp: 'A07:2021 – Identification and Authentication Failures',
+      recommendation: 'This is a confirmed phishing site. Block immediately.',
+    })
+  }
+
+  // Domain age findings
+  if (domainResult?.ageDays !== null && domainResult?.ageDays !== undefined) {
+    if (domainResult.ageDays < 30) {
+      threats.push({
+        id: `T-${Math.random().toString(36).slice(2, 8)}`,
+        name: 'Newly Registered Domain',
+        severity: 'high',
+        score: 7.2,
+        source: 'RDAP / Domain Intelligence',
+        description: `Domain registered only ${domainResult.ageDays} day(s) ago (${domainResult.registered?.slice(0,10)}). Newly registered domains are frequently used for phishing and malware campaigns.`,
+        owasp: 'A05:2021 – Security Misconfiguration',
+        recommendation: 'Exercise extreme caution — newly registered domains are a major phishing indicator.',
+      })
+    } else if (domainResult.ageDays < 180) {
+      threats.push({
+        id: `T-${Math.random().toString(36).slice(2, 8)}`,
+        name: 'Recently Registered Domain',
+        severity: 'medium',
+        score: 4.8,
+        source: 'RDAP / Domain Intelligence',
+        description: `Domain registered ${domainResult.ageDays} days ago (${domainResult.registered?.slice(0,10)}). Domains under 6 months old carry elevated risk.`,
+        owasp: 'A05:2021 – Security Misconfiguration',
+        recommendation: 'Verify the legitimacy of this domain before trusting it.',
+      })
+    }
+  }
+
   // Pattern-based findings
   const severityScoreMap = { high: 7.0, medium: 5.0, low: 2.5 }
   const patternNameMap = {
@@ -481,8 +633,11 @@ async function performScan(target) {
   const evidence = {
     urlhaus: urlhausResult,
     virustotal: vtResult,
-    urlscan: urlscanResult ? { malicious: urlscanResult.malicious, score: urlscanResult.score, categories: urlscanResult.categories, screenshot: urlscanResult.screenshot, ip: urlscanResult.ip, country: urlscanResult.country } : null,
+    urlscan: urlscanResult ? { malicious: urlscanResult.malicious, score: urlscanResult.score, categories: urlscanResult.categories, screenshot: urlscanResult.screenshot, ip: urlscanResult.ip, country: urlscanResult.country, server: urlscanResult.server } : null,
     ssl: sslResult,
+    gsb: gsbResult,
+    phishtank: phishResult,
+    domain: domainResult,
     patterns: patternFindings,
   }
 
@@ -514,6 +669,9 @@ async function performScan(target) {
       virustotal: vtResult !== null,
       urlscan: urlscanResult !== null,
       ssl: sslResult !== null,
+      gsb: gsbResult !== null,
+      phishtank: phishResult !== null,
+      domain: domainResult !== null,
       patterns: true,
     },
   }
@@ -533,11 +691,14 @@ async function saveHistory(h) {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '2.0',
+    version: '3.0',
     sources: {
       urlhaus: true,
       virustotal: !!VT_KEY,
       urlscan: !!URLSCAN_KEY,
+      gsb: !!GSB_KEY,
+      phishtank: true,
+      domain: true,
       ssl: true,
       patterns: true,
     },
@@ -545,11 +706,12 @@ app.get('/api/health', (req, res) => {
   })
 })
 
-app.post('/api/scan', async (req, res) => {
+app.post('/api/scan', rateLimit, async (req, res) => {
   const { target } = req.body || {}
   if (!target) return res.status(400).json({ error: 'Missing target URL' })
+  if (!validateTarget(target)) return res.status(400).json({ error: 'Invalid URL format' })
   try {
-    const result = await performScan(target)
+    const result = await performScan(target.trim())
     res.json(result)
   } catch (e) {
     console.error('Scan error:', e)
@@ -580,10 +742,11 @@ app.delete('/api/history/:id', async (req, res) => {
 })
 
 app.listen(PORT, () => {
-  console.log(`\n🌙 CyberScan Backend v2.0`)
+  console.log(`\n🛡  CyberScan Backend v3.0`)
   console.log(`   Running on http://localhost:${PORT}`)
-  console.log(`   Sources: URLhaus ✓ | SSL ✓ | Patterns ✓`)
-  console.log(`   VirusTotal: ${VT_KEY ? '✓' : '✗ (add key to .env)'}`)
-  console.log(`   URLScan.io: ${URLSCAN_KEY ? '✓' : '✗ (add key to .env)'}`)
+  console.log(`   Sources: URLhaus ✓ | SSL ✓ | Patterns ✓ | PhishTank ✓ | RDAP ✓`)
+  console.log(`   VirusTotal: ${VT_KEY ? '✓' : '✗ (add VIRUSTOTAL_API_KEY to .env)'}`)
+  console.log(`   URLScan.io: ${URLSCAN_KEY ? '✓' : '✗ (add URLSCAN_API_KEY to .env)'}`)
+  console.log(`   Google Safe Browsing: ${GSB_KEY ? '✓' : '✗ (add GOOGLE_SAFE_BROWSING_API_KEY to .env)'}`)
   console.log(`   AI: Grok ${GROK_KEY ? '✓' : '✗'} | Gemini ${GEMINI_KEY ? '✓' : '✗'}\n`)
 })

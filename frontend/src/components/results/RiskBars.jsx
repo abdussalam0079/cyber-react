@@ -1,39 +1,50 @@
-import { useEffect, useState } from 'react'
-import s from './RiskBars.module.css'
+import { useEffect, useRef, useState } from 'react'
+import styles from './RiskBars.module.css'
+
+const BARS = (score) => [
+  { label: 'ATTACK COMPLEXITY', value: 40 + score * 4,   color: 'var(--blue)'   },
+  { label: 'EXPLOITABILITY',    value: 55 + score * 4.2, color: 'var(--orange)' },
+  { label: 'IMPACT SCOPE',      value: 45 + score * 5,   color: 'var(--red)'    },
+  { label: 'PATCH PRIORITY',    value: score * 10,        color: 'var(--neon)'   },
+]
 
 export default function RiskBars({ score }) {
-  const [go, setGo] = useState(false)
-  useEffect(() => { const t = setTimeout(() => setGo(true), 150); return () => clearTimeout(t) }, [])
+  const [animated, setAnimated] = useState(false)
+  const ref = useRef(null)
 
-  const bars = [
-    { label: 'ATTACK COMPLEXITY', value: Math.min(40 + score * 4,   98), color: 'var(--blue)'   },
-    { label: 'EXPLOITABILITY',    value: Math.min(55 + score * 4.2, 98), color: 'var(--orange)' },
-    { label: 'IMPACT SCOPE',      value: Math.min(45 + score * 5,   98), color: 'var(--red)'    },
-    { label: 'PATCH PRIORITY',    value: Math.min(score * 10,       98), color: 'var(--accent)'  },
-  ]
+  useEffect(() => {
+    const t = setTimeout(() => setAnimated(true), 200)
+    return () => clearTimeout(t)
+  }, [])
+
+  const bars = BARS(score).map(b => ({ ...b, value: Math.min(b.value, 98) }))
 
   return (
-    <div className={s.wrap}>
-      <div className={s.heading}>RISK BREAKDOWN</div>
-      {bars.map((b, i) => (
-        <div key={b.label} className={s.bar}>
-          <div className={s.row}>
-            <span className={s.label}>{b.label}</span>
-            <span className={s.val} style={{ color: b.color }}>{Math.round(b.value)}%</span>
+    <div className={styles.wrap} ref={ref}>
+      <div className={styles.heading}>RISK BREAKDOWN</div>
+      <div className={styles.bars}>
+        {bars.map((b, i) => (
+          <div key={b.label} className={styles.bar}>
+            <div className={styles.barHeader}>
+              <span className={styles.barLabel}>{b.label}</span>
+              <span className={styles.barVal} style={{ color: b.color }}>
+                {Math.round(b.value)}%
+              </span>
+            </div>
+            <div className={styles.track}>
+              <div
+                className={styles.fill}
+                style={{
+                  background: b.color,
+                  width: animated ? `${b.value}%` : '0%',
+                  transitionDelay: `${i * 0.1}s`,
+                  boxShadow: `0 0 10px ${b.color}55`,
+                }}
+              />
+            </div>
           </div>
-          <div className={s.track}>
-            <div
-              className={s.fill}
-              style={{
-                background: b.color,
-                width: go ? `${b.value}%` : '0%',
-                transitionDelay: `${i * 0.1}s`,
-                boxShadow: `0 0 8px ${b.color}55`,
-              }}
-            />
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   )
 }

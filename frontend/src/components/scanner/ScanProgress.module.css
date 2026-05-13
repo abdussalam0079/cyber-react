@@ -3,89 +3,78 @@
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(0,0,0,0.6);
-  backdrop-filter: blur(6px);
-  z-index: 100;
+  background: rgba(3, 11, 22, 0.72);
+  z-index: 50;
 }
 
 .modal {
-  width: min(480px, calc(100vw - 2rem));
-  background: var(--card);
-  border: 1px solid var(--border-hi);
-  border-radius: 16px;
-  padding: 2rem;
-  box-shadow: var(--shadow), var(--glow);
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 1.5rem;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--neon);
-  animation: blink 1.2s ease-in-out infinite;
+  width: min(520px, calc(100vw - 2rem));
+  background: rgba(12, 20, 38, 0.96);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  border-radius: 28px;
+  padding: 1.8rem;
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.32);
 }
 
 .title {
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.15em;
-  color: var(--neon);
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.stepLabel {
+  margin: 0.75rem 0 1.3rem;
+  color: var(--muted);
+}
+
+.trackWrap {
+  margin-bottom: 1rem;
 }
 
 .track {
-  height: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 3px;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
-  margin-bottom: 0.5rem;
 }
 
 .fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent2));
-  border-radius: 3px;
-  box-shadow: 0 0 12px rgba(99,102,241,0.5);
+  background: linear-gradient(90deg, #38bdf8, #60a5fa);
 }
 
 .pct {
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  text-align: right;
-  margin-bottom: 1.25rem;
+  margin-top: 0.75rem;
+  font-weight: 700;
 }
 
 .steps {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 0.55rem;
+  margin-top: 1rem;
 }
 
 .step {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  transition: color 0.2s;
+  gap: 0.75rem;
+  color: var(--muted);
 }
 
-.icon {
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  width: 18px;
-  text-align: center;
-  flex-shrink: 0;
+.stepIcon {
+  min-width: 24px;
+  min-height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.done  { color: var(--green); }
-.active { color: var(--accent); font-weight: 500; }
+.done {
+  color: #a5f3fc;
+}
+
+.active {
+  color: #38bdf8;
+}

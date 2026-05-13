@@ -1,6 +1,21 @@
-node_modules
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+**/dist/
+
+# Environment files (contain secrets)
 .env
 .env.local
 .env.*.local
-src/utils/ai.js
 backend/.env
+
+# Runtime data
+backend/history.json
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.log
