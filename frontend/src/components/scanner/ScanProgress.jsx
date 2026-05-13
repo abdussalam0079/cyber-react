@@ -1,53 +1,56 @@
 import { motion } from 'framer-motion'
-import s from './ScanProgress.module.css'
+import { SCAN_STEPS } from '../../utils/scanner.js'
+import styles from './ScanProgress.module.css'
 
-const STEPS = [
-  'Validating URL format',
-  'Checking URLhaus database',
-  'Verifying SSL certificate',
-  'Analyzing URL patterns',
-  'Running VirusTotal scan',
-  'Generating AI analysis',
-]
-
-export default function ScanProgress({ pct, stepIdx }) {
+export default function ScanProgress({ progress }) {
   return (
-    <motion.div className={s.overlay} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div
+      className={styles.overlay}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+    >
       <motion.div
-        className={s.modal}
-        initial={{ scale: 0.94, y: 20, opacity: 0 }}
-        animate={{ scale: 1, y: 0, opacity: 1 }}
-        transition={{ type: 'spring', damping: 22, stiffness: 280 }}
+        className={styles.modal}
+        initial={{ opacity: 0, scale: 0.96, y: 20 }}
+        animate={{ opacity: 1, scale: 1,    y: 0 }}
+        transition={{ type: 'spring', damping: 24, stiffness: 260 }}
       >
-        <div className={s.header}>
-          <div className={s.dot} />
-          <span className={s.title}>SCANNING IN PROGRESS</span>
+        <div className={styles.modalGlow} />
+
+        <div className={styles.title}>⬡ SCANNING IN PROGRESS</div>
+        <div className={styles.stepLabel}>{progress.step}...</div>
+
+        {/* Progress bar */}
+        <div className={styles.trackWrap}>
+          <div className={styles.track}>
+            <motion.div
+              className={styles.fill}
+              initial={{ width: 0 }}
+              animate={{ width: `${progress.pct}%` }}
+              transition={{ ease: 'easeOut', duration: 0.4 }}
+            />
+            <div className={styles.shimmer} />
+          </div>
         </div>
 
-        <div className={s.track}>
-          <motion.div
-            className={s.fill}
-            initial={{ width: 0 }}
-            animate={{ width: `${pct}%` }}
-            transition={{ ease: 'easeOut', duration: 0.5 }}
-          />
-        </div>
-        <div className={s.pct}>{pct}%</div>
+        <div className={styles.pct}>{progress.pct}%</div>
 
-        <div className={s.steps}>
-          {STEPS.map((label, i) => {
-            const done   = i < stepIdx
-            const active = i === stepIdx
+        {/* Step list */}
+        <div className={styles.steps}>
+          {SCAN_STEPS.map((s, i) => {
+            const done   = i < progress.stepIdx
+            const active = i === progress.stepIdx
             return (
               <motion.div
-                key={label}
-                className={`${s.step} ${done ? s.done : ''} ${active ? s.active : ''}`}
-                initial={{ opacity: 0, x: -8 }}
+                key={s.label}
+                className={`${styles.step} ${done ? styles.done : ''} ${active ? styles.active : ''}`}
+                initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05 }}
+                transition={{ delay: i * 0.04 }}
               >
-                <span className={s.icon}>{done ? '✓' : active ? '▶' : '○'}</span>
-                {label}
+                <span className={styles.stepIcon}>
+                  {done ? '✓' : active ? '▶' : '○'}
+                </span>
+                {s.label}
               </motion.div>
             )
           })}

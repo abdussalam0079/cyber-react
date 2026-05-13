@@ -1,129 +1,82 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Shield, Zap, Globe, Lock, AlertTriangle, CheckCircle } from 'lucide-react'
-import { runScan } from '../utils/scanner.js'
-import ScanProgress from '../components/scanner/ScanProgress.jsx'
-import s from './HomePage.module.css'
+import { Globe, Zap, Shield, Eye, Lock } from 'lucide-react'
+import { runScan } from '../utils/scanner'
+import ScanProgress from '../components/scanner/ScanProgress'
+import styles from './HomePage.module.css'
 
 const FEATURES = [
-  { icon: Globe,         label: 'URLhaus Database',   desc: 'Real-time malware & phishing lookup' },
-  { icon: Lock,          label: 'SSL Analysis',        desc: 'Certificate validity & expiry check'  },
-  { icon: AlertTriangle, label: 'Pattern Detection',   desc: '10+ suspicious URL pattern checks'   },
-  { icon: Zap,           label: 'Grok + Gemini AI',    desc: 'Dual AI threat analysis & chat'       },
+  { icon: <Shield size={16} />, label: 'URLhaus + VirusTotal' },
+  { icon: <Eye size={16} />,    label: 'Google Safe Browsing' },
+  { icon: <Lock size={16} />,   label: 'SSL + PhishTank + WHOIS' },
 ]
 
-const STEPS_COUNT = 6
-
 export default function HomePage() {
-  const [url, setUrl]         = useState('')
+  const [target,   setTarget]   = useState('')
   const [scanning, setScanning] = useState(false)
-  const [progress, setProgress] = useState({ pct: 0, stepIdx: 0 })
-  const [error, setError]     = useState('')
+  const [progress, setProgress] = useState(null)
   const navigate = useNavigate()
 
-  function simulateProgress(resolve) {
-    let step = 0
-    const steps = [8, 22, 40, 58, 75, 90]
-    const iv = setInterval(() => {
-      if (step < steps.length) {
-        setProgress({ pct: steps[step], stepIdx: step })
-        step++
-      } else {
-        clearInterval(iv)
-        resolve()
-      }
-    }, 600)
-    return iv
-  }
-
-  async function handleScan() {
-    const target = url.trim()
-    if (!target) return
-    setError('')
+  const handleScan = async () => {
+    const t = target.trim()
+    if (!t) return
     setScanning(true)
-    setProgress({ pct: 0, stepIdx: 0 })
-
-    let iv
+    setProgress({ step: 'Initializing...', stepIdx: 0, pct: 0 })
     try {
-      await new Promise(r => { iv = simulateProgress(r) })
-      const result = await runScan(target)
-      setProgress({ pct: 100, stepIdx: STEPS_COUNT })
-      await new Promise(r => setTimeout(r, 400))
+      const result = await runScan(t, 'url', p => setProgress(p))
       navigate('/results', { state: { scan: result } })
-    } catch (e) {
-      clearInterval(iv)
-      setError(e.message)
+    } catch (err) {
       setScanning(false)
+      setProgress(null)
+      alert('Scan failed: ' + err.message)
     }
   }
 
   return (
-    <div className={s.page}>
-      {scanning && <ScanProgress pct={progress.pct} stepIdx={progress.stepIdx} />}
+    <div className={styles.page}>
+      {scanning && progress && <ScanProgress progress={progress} />}
 
-      <div className={s.hero}>
-        <div className={s.moonBadge}>
-          <span className={s.moonIcon}>🌙</span>
-          Real-Time Threat Detection
+      <div className={styles.card}>
+        <div className={styles.hero}>
+          <div className={styles.overline}>
+            <Globe size={13} /> Real-Time Threat Intelligence
+          </div>
+          <h1 className={styles.title}>URL Threat Scanner</h1>
+          <p className={styles.subtitle}>
+            Scan any URL against 7+ live threat intelligence sources — malware databases,
+            phishing registries, SSL analysis, domain age, and AI-powered assessment.
+          </p>
         </div>
-        <h1 className={s.title}>
-          Scan Any URL for<br />
-          <span className={s.gradient}>Security Threats</span>
-        </h1>
-        <p className={s.sub}>
-          Multi-source threat intelligence — URLhaus, SSL analysis, pattern detection,
-          and dual AI analysis with Grok + Gemini.
-        </p>
-      </div>
 
-      <div className={s.card}>
-        <div className={s.inputWrap}>
-          <Globe size={18} className={s.inputIcon} />
+        <div className={styles.checks}>
+          {FEATURES.map(f => (
+            <div key={f.label} className={styles.checkItem}>
+              {f.icon} {f.label}
+            </div>
+          ))}
+        </div>
+
+        <div>
+          <label className={styles.label}>Target URL</label>
           <input
-            className={s.input}
             type="text"
+            className={styles.input}
             placeholder="https://example.com or example.com"
-            value={url}
-            onChange={e => { setUrl(e.target.value); setError('') }}
-            onKeyDown={e => e.key === 'Enter' && handleScan()}
+            value={target}
+            onChange={e => setTarget(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !scanning && handleScan()}
             disabled={scanning}
-            autoFocus
           />
         </div>
 
-        {error && (
-          <div className={s.error}>
-            <AlertTriangle size={14} />
-            {error}
-          </div>
-        )}
-
         <button
-          className={s.scanBtn}
+          className={styles.scanButton}
           onClick={handleScan}
-          disabled={!url.trim() || scanning}
+          disabled={!target.trim() || scanning}
         >
-          <Shield size={18} />
-          {scanning ? 'Scanning...' : 'Scan URL'}
+          <Zap size={18} />
+          {scanning ? 'Scanning...' : 'Start Threat Scan'}
         </button>
-
-        <div className={s.hint}>
-          Try: <span onClick={() => setUrl('http://malware.testing.google.test/testing/malware/')}>malware test</span>
-          {' · '}
-          <span onClick={() => setUrl('https://github.com')}>safe site</span>
-        </div>
-      </div>
-
-      <div className={s.features}>
-        {FEATURES.map(({ icon: Icon, label, desc }) => (
-          <div key={label} className={s.feature}>
-            <div className={s.featureIcon}><Icon size={18} /></div>
-            <div>
-              <div className={s.featureLabel}>{label}</div>
-              <div className={s.featureDesc}>{desc}</div>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   )

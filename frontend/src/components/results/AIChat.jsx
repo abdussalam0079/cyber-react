@@ -1,109 +1,127 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, Bot, Zap } from 'lucide-react'
-import { aiChat } from '../../utils/scanner.js'
-import s from './AIChat.module.css'
+import { Send, Cpu } from 'lucide-react'
+import { callAI, loadAIConfig, engineLabel } from '../../utils/ai.js'
+import styles from './AIChat.module.css'
 
-const QUICK = [
-  'Is this URL dangerous?',
-  'What is the biggest risk?',
-  'How do I stay safe?',
-  'Explain the SSL issue',
+const QUICK_QUESTIONS = [
+  'Which threat is most urgent?',
+  'Is this URL safe to visit?',
+  'What is my overall risk level?',
+  'How do I block this threat?',
 ]
 
-export default function AIChat({ scan }) {
-  const threatNames = scan.threats.map(t => t.name).join(', ') || 'none'
-  const context = `URL: ${scan.target} | Score: ${scan.score}/10 | Threats: ${threatNames} | Safe: ${scan.safe}`
+const ENGINE_BADGE = {
+  grok:   { icon: '𝕏', label: 'GROK',   color: '#e0e0e0' },
+  gemini: { icon: '✦', label: 'GEMINI', color: '#4285f4' },
+  dual:   { icon: '⚡', label: 'DUAL',   color: 'var(--neon)' },
+}
 
-  const [msgs, setMsgs] = useState([{
-    role: 'ai',
-    text: scan.aiAnalysis?.text
-      ? scan.aiAnalysis.text
-      : scan.safe
-        ? `✅ "${scan.target}" appears safe — no threats detected. Ask me anything about this scan.`
-        : `⚠️ Found ${scan.threats.length} threat(s) on "${scan.target}" (score ${scan.score}/10). Ask me anything.`,
-    engine: scan.aiAnalysis?.engine,
-  }])
-  const [input, setInput] = useState('')
+export default function AIChat({ scan }) {
+  const threats = scan.vulnerabilities ?? scan.threats ?? []
+  const [messages, setMessages] = useState([
+    {
+      role: 'ai',
+      text: `Scan complete for "${scan.target.slice(0, 50)}${scan.target.length > 50 ? '…' : ''}". Found ${threats.length} threat(s) — ${scan.summary?.critical ?? 0} critical. Ask me anything about the results.`,
+    },
+  ])
+  const [input,   setInput]   = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [msgs])
+  }, [messages])
 
   async function send(q) {
-    const text = (q || input).trim()
-    if (!text || loading) return
+    const question = (q || input).trim()
+    if (!question || loading) return
     setInput('')
-    setMsgs(m => [...m, { role: 'user', text }])
+    setMessages(m => [...m, { role: 'user', text: question }])
     setLoading(true)
     try {
-      const res = await aiChat(text, context)
-      setMsgs(m => [...m, { role: 'ai', text: res.text, engine: res.engine }])
+      const prompt = `You are CYBERSCAN AI, a cybersecurity assistant. Answer in 2-4 sentences. Be practical and direct.
+
+Scan context: Target "${scan.target}" — ${threats.length} threats found: ${threats.map(v => v.name).join(', ') || 'none'}. Overall risk score: ${scan.score}/10.
+
+User question: ${question}`
+
+      const answer = await callAI(prompt, { preferGemini: true })
+      setMessages(m => [...m, { role: 'ai', text: answer }])
     } catch (e) {
-      setMsgs(m => [...m, { role: 'ai', text: `✕ ${e.message}`, isError: true }])
+      setMessages(m => [...m, { role: 'ai', text: `✕ ${e.message}`, isError: true }])
     }
     setLoading(false)
   }
 
+  const cfg   = loadAIConfig()
+  const badge = ENGINE_BADGE[cfg.engine] || ENGINE_BADGE.grok
+
   return (
-    <div className={s.box}>
-      <div className={s.header}>
-        <div className={s.label}>
-          <div className={s.dot} />
-          <Bot size={13} />
-          CYBERSCAN AI
+    <div className={styles.box}>
+      <div className={styles.header}>
+        <div className={styles.aiLabel}>
+          <div className={styles.aiDot} />
+          <Cpu size={13} />
+          CYBERSCAN AI ASSISTANT
         </div>
-        <div className={s.quick}>
-          {QUICK.map(q => (
-            <button key={q} className={s.qBtn} onClick={() => send(q)}>{q}</button>
+        <div className={styles.engineBadge} style={{ color: badge.color, borderColor: `${badge.color}44` }}>
+          {badge.icon} {badge.label}
+        </div>
+        <div className={styles.quickBtns}>
+          {QUICK_QUESTIONS.map(q => (
+            <button key={q} className={styles.quickBtn} onClick={() => send(q)}>
+              {q}
+            </button>
           ))}
         </div>
       </div>
 
-      <div className={s.msgs}>
+      <div className={styles.messages}>
         <AnimatePresence initial={false}>
-          {msgs.map((m, i) => (
+          {messages.map((m, i) => (
             <motion.div
               key={i}
-              className={`${s.msg} ${m.role === 'user' ? s.user : ''}`}
-              initial={{ opacity: 0, y: 8 }}
+              className={`${styles.msg} ${m.role === 'user' ? styles.userMsg : ''}`}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: 0.25 }}
             >
-              <div className={`${s.avatar} ${m.role === 'user' ? s.uAvatar : s.aAvatar}`}>
+              <div className={`${styles.avatar} ${m.role === 'user' ? styles.userAvatar : styles.aiAvatar}`}>
                 {m.role === 'ai' ? 'AI' : 'ME'}
               </div>
-              <div className={`${s.bubble} ${m.role === 'user' ? s.uBubble : ''} ${m.isError ? s.errBubble : ''}`}>
+              <div className={`${styles.bubble} ${m.role === 'user' ? styles.userBubble : ''} ${m.isError ? styles.errBubble : ''}`}>
                 {m.text}
-                {m.engine && <span className={s.engine}>{m.engine}</span>}
               </div>
             </motion.div>
           ))}
         </AnimatePresence>
 
         {loading && (
-          <motion.div className={s.msg} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <div className={`${s.avatar} ${s.aAvatar}`}>AI</div>
-            <div className={s.bubble}>
-              <div className={s.typing}><span /><span /><span /></div>
+          <motion.div className={styles.msg} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+            <div className={`${styles.avatar} ${styles.aiAvatar}`}>AI</div>
+            <div className={styles.bubble}>
+              <div className={styles.typing}><span /><span /><span /></div>
             </div>
           </motion.div>
         )}
         <div ref={bottomRef} />
       </div>
 
-      <div className={s.inputRow}>
+      <div className={styles.inputRow}>
         <input
-          className={s.input}
-          placeholder="Ask about this scan..."
+          className={styles.chatInput}
+          placeholder="Ask about threats, fixes, risk levels..."
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
           disabled={loading}
         />
-        <button className={s.sendBtn} onClick={() => send()} disabled={loading || !input.trim()}>
+        <button
+          className={styles.sendBtn}
+          onClick={() => send()}
+          disabled={loading || !input.trim()}
+        >
           <Send size={14} />
         </button>
       </div>
