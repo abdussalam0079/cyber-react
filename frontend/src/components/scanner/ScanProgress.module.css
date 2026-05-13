@@ -1,0 +1,91 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(6px);
+  z-index: 100;
+}
+
+.modal {
+  width: min(480px, calc(100vw - 2rem));
+  background: var(--card);
+  border: 1px solid var(--border-hi);
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow: var(--shadow), var(--glow);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.5rem;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--neon);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.title {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--neon);
+}
+
+.track {
+  height: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 3px;
+  box-shadow: 0 0 12px rgba(99,102,241,0.5);
+}
+
+.pct {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-align: right;
+  margin-bottom: 1.25rem;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  transition: color 0.2s;
+}
+
+.icon {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.done  { color: var(--green); }
+.active { color: var(--accent); font-weight: 500; }
