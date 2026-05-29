@@ -5,6 +5,8 @@ import https from 'https'
 import dns from 'dns/promises'
 import fs from 'fs/promises'
 import path from 'path'
+import session from 'express-session'
+import bcrypt from 'bcryptjs'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 
@@ -23,8 +25,76 @@ const URLSCAN_KEY = process.env.URLSCAN_API_KEY
 const GSB_KEY     = process.env.GOOGLE_SAFE_BROWSING_API_KEY
 
 const app = express()
-app.use(cors())
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000'
+const frontendOrigins = [FRONTEND_URL, 'http://127.0.0.1:3000', 'http://localhost:5173', 'http://127.0.0.1:5173']
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || frontendOrigins.includes(origin)) return callback(null, true)
+    callback(new Error('CORS origin denied'))
+  },
+  credentials: true,
+}))
 app.use(express.json())
+app.use(express.urlencoded({ extended: false }))
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'cyberscan-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: false,
+    maxAge: 1000 * 60 * 60 * 24 * 7,
+  },
+}))
+
+const USERS_FILE = path.join(__dirname, 'users.json')
+
+async function loadUsers() {
+  try {
+    const file = await fs.readFile(USERS_FILE, 'utf8')
+    return JSON.parse(file)
+  } catch {
+    return []
+  }
+}
+
+async function saveUsers(users) {
+  await fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2), 'utf8')
+}
+
+async function getUserByEmail(email) {
+  const users = await loadUsers()
+  return users.find(user => user.email === email.toLowerCase().trim())
+}
+
+function requireAuth(req, res, next) {
+  if (req.session?.user?.id) return next()
+  return res.status(401).json({ error: 'Authentication required' })
+}
+
+function sanitizeUser(user) {
+  if (!user) return null
+  return { id: user.id, email: user.email, createdAt: user.createdAt }
+}
+
+async function registerUser(email, password) {
+  const hashed = await bcrypt.hash(password, 12)
+  const now = new Date().toISOString()
+  const users = await loadUsers()
+  const id = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1
+  const user = { id, email: email.toLowerCase().trim(), password: hashed, createdAt: now }
+  users.push(user)
+  await saveUsers(users)
+  return user
+}
+
+async function verifyUser(email, password) {
+  const user = await getUserByEmail(email)
+  if (!user) return null
+  const valid = await bcrypt.compare(password, user.password)
+  return valid ? user : null
+}
 
 // ── RATE LIMITING ─────────────────────────────────────────
 const scanCounts = new Map()
@@ -382,52 +452,129 @@ Be direct and technical. No fluff.`
 
 // ── AI CHAT ───────────────────────────────────────────────
 
+function formatAIError(e) {
+  if (e.response?.data?.error) return e.response.data.error
+  if (e.response?.statusText) return `${e.response.status}: ${e.response.statusText}`
+  return e.message || 'Unknown AI error'
+}
+
+function isAIAuthError(e) {
+  const message = String(e.response?.data?.error || e.response?.data?.message || e.message || '')
+  return /unauthoriz|invalid|permission|auth|token|key/i.test(message)
+}
+
+async function callGrokAI(fullPrompt) {
+  const body = {
+    model: 'grok-3-mini',
+    max_tokens: 500,
+    messages: [
+      { role: 'system', content: 'You are CYBERSCAN AI, an elite cybersecurity analyst. Be direct, practical, and concise. Answer in 3-5 sentences max.' },
+      { role: 'user', content: fullPrompt },
+    ],
+  }
+
+  try {
+    const r = await axios.post(
+      'https://api.x.ai/v1/chat/completions',
+      body,
+      { headers: { Authorization: `Bearer ${GROK_KEY}`, 'Content-Type': 'application/json' }, timeout: 20000 }
+    )
+    return { text: r.data.choices?.[0]?.message?.content, engine: 'Grok' }
+  } catch (e) {
+    if (isAIAuthError(e)) {
+      const retry = await axios.post(
+        'https://api.x.ai/v1/chat/completions',
+        body,
+        { headers: { 'X-API-Key': GROK_KEY, 'Content-Type': 'application/json' }, timeout: 20000 }
+      )
+      return { text: retry.data.choices?.[0]?.message?.content, engine: 'Grok' }
+    }
+    throw e
+  }
+}
+
+async function callGeminiAI(fullPrompt) {
+  const r = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+    {
+      contents: [{ parts: [{ text: 'You are CYBERSCAN AI, an elite cybersecurity analyst. Be direct, practical, and concise. Answer in 3-5 sentences max.\n\n' + fullPrompt }] }],
+      generationConfig: { maxOutputTokens: 500, temperature: 0.3 },
+    },
+    { headers: { 'Content-Type': 'application/json' }, timeout: 20000 }
+  )
+  return { text: r.data.candidates?.[0]?.content?.parts?.[0]?.text, engine: 'Gemini' }
+}
+
+function createFallbackAIResponse(fullPrompt) {
+  const safeMatch = /safe|visit|risk level|allowed|secure/i.test(fullPrompt)
+  const blockMatch = /block|stop|prevent|malicious|danger|unsafe/i.test(fullPrompt)
+  if (safeMatch && !blockMatch) {
+    return 'AI chat is currently running in fallback mode because no AI API keys are configured. Based on the scan context, inspect the threat summary and sources above: if critical or high threats are present, avoid visiting this URL and treat it as unsafe.'
+  }
+  if (blockMatch) {
+    return 'AI chat is in fallback mode without configured API keys. The safest action is to block or avoid this URL if any critical/high threats are listed, and use your security controls to prevent access.'
+  }
+  return 'AI chat is unavailable because no API keys are configured. Add GROK_API_KEY or GEMINI_API_KEY to backend/.env to enable live AI responses.'
+}
+
 app.post('/api/ai/chat', async (req, res) => {
   const { message, context, engine } = req.body
   if (!message) return res.status(400).json({ error: 'Missing message' })
 
-  const systemPrompt = 'You are CYBERSCAN AI, an elite cybersecurity analyst. Be direct, practical, and concise. Answer in 3-5 sentences max.'
   const fullPrompt = context
     ? `Scan context: ${context}\n\nUser question: ${message}`
     : message
 
-  if ((engine === 'grok' || engine === 'dual' || !engine) && GROK_KEY) {
-    try {
-      const r = await axios.post(
-        'https://api.x.ai/v1/chat/completions',
-        {
-          model: 'grok-3-mini',
-          max_tokens: 500,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: fullPrompt },
-          ],
-        },
-        { headers: { Authorization: `Bearer ${GROK_KEY}`, 'Content-Type': 'application/json' }, timeout: 20000 }
-      )
-      return res.json({ text: r.data.choices?.[0]?.message?.content, engine: 'Grok' })
-    } catch (e) {
-      if (engine === 'grok') return res.status(500).json({ error: e.message })
-    }
-  }
-
   if ((engine === 'gemini' || engine === 'dual' || !engine) && GEMINI_KEY) {
     try {
-      const r = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-        {
-          contents: [{ parts: [{ text: systemPrompt + '\n\n' + fullPrompt }] }],
-          generationConfig: { maxOutputTokens: 500, temperature: 0.3 },
-        },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 20000 }
-      )
-      return res.json({ text: r.data.candidates?.[0]?.content?.parts?.[0]?.text, engine: 'Gemini' })
-    } catch (e) {
-      return res.status(500).json({ error: e.message })
+      return res.json(await callGeminiAI(fullPrompt))
+    } catch (geminiError) {
+      const geminiMessage = formatAIError(geminiError)
+      if (GROK_KEY) {
+        console.log('Gemini failed, falling back to Grok:', geminiMessage)
+        try {
+          return res.json(await callGrokAI(fullPrompt))
+        } catch (grokError) {
+          const fallback = isAIAuthError(geminiError) || isAIAuthError(grokError)
+          if (fallback) {
+            return res.json({ text: createFallbackAIResponse(fullPrompt), engine: 'Fallback' })
+          }
+          return res.status(500).json({ error: `Gemini failed: ${geminiMessage}; Grok failed: ${formatAIError(grokError)}` })
+        }
+      }
+      if (isAIAuthError(geminiError)) {
+        return res.json({ text: createFallbackAIResponse(fullPrompt), engine: 'Fallback' })
+      }
+      return res.status(500).json({ error: `Gemini failed: ${geminiMessage}` })
     }
   }
 
-  res.status(503).json({ error: 'No AI API keys configured. Add GROK_API_KEY or GEMINI_API_KEY to backend/.env' })
+  if ((engine === 'grok' || engine === 'dual' || !engine) && GROK_KEY) {
+    try {
+      return res.json(await callGrokAI(fullPrompt))
+    } catch (grokError) {
+      const grokMessage = formatAIError(grokError)
+      if (GEMINI_KEY) {
+        console.log('Grok failed, falling back to Gemini:', grokMessage)
+        try {
+          return res.json(await callGeminiAI(fullPrompt))
+        } catch (geminiError) {
+          const fallback = isAIAuthError(grokError) || isAIAuthError(geminiError)
+          if (fallback) {
+            return res.json({ text: createFallbackAIResponse(fullPrompt), engine: 'Fallback' })
+          }
+          return res.status(500).json({ error: `Grok failed: ${grokMessage}; Gemini failed: ${formatAIError(geminiError)}` })
+        }
+      }
+      if (isAIAuthError(grokError)) {
+        return res.json({ text: createFallbackAIResponse(fullPrompt), engine: 'Fallback' })
+      }
+      return res.status(500).json({ error: `Grok failed: ${grokMessage}` })
+    }
+  }
+
+  const fallbackText = createFallbackAIResponse(fullPrompt)
+  return res.json({ text: fallbackText, engine: 'Fallback' })
 })
 
 // ── MAIN SCAN ─────────────────────────────────────────────
@@ -688,6 +835,51 @@ async function saveHistory(h) {
 
 // ── ROUTES ────────────────────────────────────────────────
 
+app.post('/auth/register', async (req, res) => {
+  const { email, password } = req.body || {}
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Email and password are required' })
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' })
+  }
+  try {
+    const existing = await getUserByEmail(email)
+    if (existing) return res.status(409).json({ error: 'Email already registered' })
+    const user = await registerUser(email, password)
+    req.session.user = sanitizeUser(user)
+    res.status(201).json({ user: sanitizeUser(user) })
+  } catch (err) {
+    console.error('Register error:', err)
+    res.status(500).json({ error: 'Unable to create account' })
+  }
+})
+
+app.post('/auth/login', async (req, res) => {
+  const { email, password } = req.body || {}
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Email and password are required' })
+  }
+  try {
+    const user = await verifyUser(email, password)
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' })
+    req.session.user = sanitizeUser(user)
+    res.json({ user: sanitizeUser(user) })
+  } catch (err) {
+    console.error('Login error:', err)
+    res.status(500).json({ error: 'Unable to login' })
+  }
+})
+
+app.get('/auth/me', (req, res) => {
+  res.json({ user: sanitizeUser(req.session?.user) })
+})
+
+app.post('/auth/logout', (req, res) => {
+  req.session.destroy(() => {})
+  res.json({ success: true })
+})
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -706,7 +898,7 @@ app.get('/api/health', (req, res) => {
   })
 })
 
-app.post('/api/scan', rateLimit, async (req, res) => {
+app.post('/api/scan', rateLimit, requireAuth, async (req, res) => {
   const { target } = req.body || {}
   if (!target) return res.status(400).json({ error: 'Missing target URL' })
   if (!validateTarget(target)) return res.status(400).json({ error: 'Invalid URL format' })
@@ -719,9 +911,9 @@ app.post('/api/scan', rateLimit, async (req, res) => {
   }
 })
 
-app.get('/api/history', async (req, res) => res.json(await loadHistory()))
+app.get('/api/history', requireAuth, async (req, res) => res.json(await loadHistory()))
 
-app.post('/api/history', async (req, res) => {
+app.post('/api/history', requireAuth, async (req, res) => {
   const scan = req.body
   if (!scan?.id) return res.status(400).json({ error: 'Invalid payload' })
   const h = await loadHistory()
@@ -730,12 +922,12 @@ app.post('/api/history', async (req, res) => {
   res.status(201).json({ success: true })
 })
 
-app.delete('/api/history', async (req, res) => {
+app.delete('/api/history', requireAuth, async (req, res) => {
   await saveHistory([])
   res.json({ success: true })
 })
 
-app.delete('/api/history/:id', async (req, res) => {
+app.delete('/api/history/:id', requireAuth, async (req, res) => {
   const h = await loadHistory()
   await saveHistory(h.filter(i => i.id !== req.params.id))
   res.json({ success: true })

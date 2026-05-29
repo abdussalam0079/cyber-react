@@ -1,20 +1,26 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useOutletContext } from 'react-router-dom'
 import { Eye, Trash2 } from 'lucide-react'
 import { getHistory, clearHistory, deleteHistoryItem } from '../utils/scanner'
 import styles from './HistoryPage.module.css'
 
 export default function HistoryPage() {
   const navigate = useNavigate()
+  const { user, authReady } = useOutletContext()
   const [history, setHistory] = useState([])
   const [confirmClear, setConfirmClear] = useState(false)
 
   useEffect(() => {
+    if (authReady && !user) {
+      navigate('/login')
+      return
+    }
+
     async function load() {
       setHistory(await getHistory())
     }
-    load()
-  }, [])
+    if (user) load()
+  }, [authReady, user, navigate])
 
   const handleClear = async () => {
     if (!confirmClear) {
