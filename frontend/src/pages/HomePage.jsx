@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useNavigate, useOutletContext } from 'react-router-dom'
 import { Globe, Zap, Shield, Eye, Lock } from 'lucide-react'
 import { runScan } from '../utils/scanner'
 import ScanProgress from '../components/scanner/ScanProgress'
@@ -16,6 +16,13 @@ export default function HomePage() {
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState(null)
   const navigate = useNavigate()
+  const { user, authReady } = useOutletContext()
+
+  useEffect(() => {
+    if (authReady && !user) {
+      navigate('/login')
+    }
+  }, [authReady, user, navigate])
 
   const handleScan = async () => {
     const t = target.trim()
