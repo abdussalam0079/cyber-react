@@ -2,65 +2,90 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #f7f5ef 0%, #ede7da 100%);
+  background: transparent;
 }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1.5rem;
-  padding: 1.3rem 2rem;
-  background: rgba(255, 255, 255, 0.75);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
-  backdrop-filter: blur(16px);
+  gap: 1rem;
+  padding: 1.5rem 2rem;
+  background: rgba(255, 255, 255, 0.78);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
   position: sticky;
   top: 0;
-  z-index: 40;
+  z-index: 50;
 }
 
 .brand {
-  font-size: 1.5rem;
+  font-size: clamp(1.75rem, 2vw, 2.2rem);
   font-weight: 800;
   color: var(--text-strong);
-  letter-spacing: -0.04em;
+  letter-spacing: -0.05em;
 }
 
 .nav {
   display: flex;
   gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
-.nav button {
-  padding: 0.8rem 1.1rem;
+.nav button,
+.themeToggle {
+  padding: 0.95rem 1.2rem;
   border-radius: 999px;
-  background: rgba(17, 24, 39, 0.05);
-  color: var(--text-muted);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  font-weight: 600;
-  transition: all 0.25s ease;
+  background: var(--surface);
+  color: var(--text-strong);
+  border: 1px solid var(--border-soft);
+  font-weight: 700;
+  transition: transform 0.25s ease, background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
 }
 
 .nav button:hover,
+.themeToggle:hover,
 .nav .active {
-  background: rgba(17, 24, 39, 0.08);
+  transform: translateY(-1px);
+  background: var(--surface-soft);
+  border-color: var(--border-strong);
+}
+
+.nav button {
+  color: var(--text-muted);
+}
+
+.nav .active {
   color: var(--text-strong);
-  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.themeToggle {
+  margin-left: 0.2rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.themeToggle:hover {
+  background: var(--accent);
+  color: #ffffff;
 }
 
 .main {
   flex: 1;
-  padding: 3rem 2rem;
+  padding: 2.5rem 2rem 3rem;
   animation: fadeIn 0.5s ease-out;
 }
 
 .footer {
-  padding: 2rem;
+  padding: 1.75rem 2rem;
   color: var(--text-muted);
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(255, 255, 255, 0.8);
+  border-top: 1px solid var(--border-soft);
   text-align: center;
   font-size: 0.95rem;
+  background: transparent;
 }
 
 @keyframes fadeIn {
