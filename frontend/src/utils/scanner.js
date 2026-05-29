@@ -31,6 +31,7 @@ export async function runScan(target, _type, onProgress) {
   const [result] = await Promise.all([
     fetch(`${API_BASE}/scan`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ target }),
     }).then(async res => {
@@ -50,7 +51,7 @@ export async function runScan(target, _type, onProgress) {
 
 export async function getHistory() {
   try {
-    const response = await fetch(`${API_BASE}/history`)
+    const response = await fetch(`${API_BASE}/history`, { credentials: 'include' })
     if (!response.ok) throw new Error('History fetch failed')
     return await response.json()
   } catch { return [] }
@@ -60,6 +61,7 @@ export async function saveToHistory(scan) {
   try {
     const response = await fetch(`${API_BASE}/history`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(scan),
     })
@@ -72,7 +74,7 @@ export async function saveToHistory(scan) {
 
 export async function clearHistory() {
   try {
-    const response = await fetch(`${API_BASE}/history`, { method: 'DELETE' })
+    const response = await fetch(`${API_BASE}/history`, { method: 'DELETE', credentials: 'include' })
     if (!response.ok) throw new Error('Clear failed')
     return await response.json()
   } catch (error) {
@@ -82,7 +84,7 @@ export async function clearHistory() {
 
 export async function deleteHistoryItem(id) {
   try {
-    const response = await fetch(`${API_BASE}/history/${id}`, { method: 'DELETE' })
+    const response = await fetch(`${API_BASE}/history/${id}`, { method: 'DELETE', credentials: 'include' })
     if (!response.ok) throw new Error('Delete failed')
     return await response.json()
   } catch (error) {
