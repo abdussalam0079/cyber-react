@@ -8,10 +8,7 @@ import path from 'path'
 import session from 'express-session'
 import bcrypt from 'bcryptjs'
 import { fileURLToPath } from 'url'
-import { createRequire } from 'module'
-
-const require = createRequire(import.meta.url)
-const dotenv = require('dotenv')
+import dotenv from 'dotenv'
 dotenv.config()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -19,7 +16,6 @@ const PORT = process.env.PORT || 4000
 const HISTORY_FILE = path.join(__dirname, 'history.json')
 
 const GROK_KEY    = process.env.GROK_API_KEY
-const GEMINI_KEY  = process.env.GEMINI_API_KEY
 const VT_KEY      = process.env.VIRUSTOTAL_API_KEY
 const URLSCAN_KEY = process.env.URLSCAN_API_KEY
 const GSB_KEY     = process.env.GOOGLE_SAFE_BROWSING_API_KEY
@@ -410,42 +406,21 @@ Provide:
 
 Be direct and technical. No fluff.`
 
-  // Try Grok first, fallback to Gemini
+  // Use Grok for AI analysis (Gemini disabled in this deployment)
   if (GROK_KEY) {
     try {
       const res = await axios.post(
-        'https://api.x.ai/v1/chat/completions',
-        {
-          model: 'grok-3-mini',
-          max_tokens: 400,
-          messages: [
-            { role: 'system', content: 'You are CYBERSCAN AI, an elite cybersecurity analyst.' },
-            { role: 'user', content: prompt },
-          ],
-        },
+        'https://api.grok.ai/v1/chat/completions',
+        { model: 'grok-3-mini', max_tokens: 400, messages: [{ role: 'system', content: 'You are CYBERSCAN AI, an elite cybersecurity analyst.' }, { role: 'user', content: prompt }] },
         { headers: { Authorization: `Bearer ${GROK_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
       )
       return { text: res.data.choices?.[0]?.message?.content, engine: 'Grok' }
     } catch (e) {
-      console.log('Grok failed, trying Gemini:', e.message)
+      console.log('Grok AI analysis failed:', e.response?.data?.error || e.message)
     }
   }
 
-  if (GEMINI_KEY) {
-    try {
-      const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-        {
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 400, temperature: 0.3 },
-        },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }
-      )
-      return { text: res.data.candidates?.[0]?.content?.parts?.[0]?.text, engine: 'Gemini' }
-    } catch (e) {
-      console.log('Gemini failed:', e.message)
-    }
-  }
+  return null
 
   return null
 }
@@ -472,38 +447,14 @@ async function callGrokAI(fullPrompt) {
       { role: 'user', content: fullPrompt },
     ],
   }
-
-  try {
-    const r = await axios.post(
-      'https://api.x.ai/v1/chat/completions',
-      body,
-      { headers: { Authorization: `Bearer ${GROK_KEY}`, 'Content-Type': 'application/json' }, timeout: 20000 }
-    )
-    return { text: r.data.choices?.[0]?.message?.content, engine: 'Grok' }
-  } catch (e) {
-    if (isAIAuthError(e)) {
-      const retry = await axios.post(
-        'https://api.x.ai/v1/chat/completions',
-        body,
-        { headers: { 'X-API-Key': GROK_KEY, 'Content-Type': 'application/json' }, timeout: 20000 }
-      )
-      return { text: retry.data.choices?.[0]?.message?.content, engine: 'Grok' }
-    }
-    throw e
-  }
-}
-
-async function callGeminiAI(fullPrompt) {
   const r = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-    {
-      contents: [{ parts: [{ text: 'You are CYBERSCAN AI, an elite cybersecurity analyst. Be direct, practical, and concise. Answer in 3-5 sentences max.\n\n' + fullPrompt }] }],
-      generationConfig: { maxOutputTokens: 500, temperature: 0.3 },
-    },
-    { headers: { 'Content-Type': 'application/json' }, timeout: 20000 }
+    'https://api.grok.ai/v1/chat/completions',
+    body,
+    { headers: { Authorization: `Bearer ${GROK_KEY}`, 'Content-Type': 'application/json' }, timeout: 20000 }
   )
-  return { text: r.data.candidates?.[0]?.content?.parts?.[0]?.text, engine: 'Gemini' }
+  return { text: r.data.choices?.[0]?.message?.content, engine: 'Grok' }
 }
+
 
 function createFallbackAIResponse(fullPrompt) {
   const safeMatch = /safe|visit|risk level|allowed|secure/i.test(fullPrompt)
@@ -514,7 +465,7 @@ function createFallbackAIResponse(fullPrompt) {
   if (blockMatch) {
     return 'AI chat is in fallback mode without configured API keys. The safest action is to block or avoid this URL if any critical/high threats are listed, and use your security controls to prevent access.'
   }
-  return 'AI chat is unavailable because no API keys are configured. Add GROK_API_KEY or GEMINI_API_KEY to backend/.env to enable live AI responses.'
+  return 'AI chat is unavailable because no API keys are configured. Add GROK_API_KEY to backend/.env to enable live AI responses.'
 }
 
 app.post('/api/ai/chat', async (req, res) => {
@@ -525,53 +476,20 @@ app.post('/api/ai/chat', async (req, res) => {
     ? `Scan context: ${context}\n\nUser question: ${message}`
     : message
 
-  if ((engine === 'gemini' || engine === 'dual' || !engine) && GEMINI_KEY) {
-    try {
-      return res.json(await callGeminiAI(fullPrompt))
-    } catch (geminiError) {
-      const geminiMessage = formatAIError(geminiError)
-      if (GROK_KEY) {
-        console.log('Gemini failed, falling back to Grok:', geminiMessage)
-        try {
-          return res.json(await callGrokAI(fullPrompt))
-        } catch (grokError) {
-          const fallback = isAIAuthError(geminiError) || isAIAuthError(grokError)
-          if (fallback) {
-            return res.json({ text: createFallbackAIResponse(fullPrompt), engine: 'Fallback' })
-          }
-          return res.status(500).json({ error: `Gemini failed: ${geminiMessage}; Grok failed: ${formatAIError(grokError)}` })
-        }
-      }
-      if (isAIAuthError(geminiError)) {
-        return res.json({ text: createFallbackAIResponse(fullPrompt), engine: 'Fallback' })
-      }
-      return res.status(500).json({ error: `Gemini failed: ${geminiMessage}` })
-    }
-  }
-
-  if ((engine === 'grok' || engine === 'dual' || !engine) && GROK_KEY) {
+  // Use Grok for all chat requests when configured.
+  if (GROK_KEY) {
     try {
       return res.json(await callGrokAI(fullPrompt))
     } catch (grokError) {
       const grokMessage = formatAIError(grokError)
-      if (GEMINI_KEY) {
-        console.log('Grok failed, falling back to Gemini:', grokMessage)
-        try {
-          return res.json(await callGeminiAI(fullPrompt))
-        } catch (geminiError) {
-          const fallback = isAIAuthError(grokError) || isAIAuthError(geminiError)
-          if (fallback) {
-            return res.json({ text: createFallbackAIResponse(fullPrompt), engine: 'Fallback' })
-          }
-          return res.status(500).json({ error: `Grok failed: ${grokMessage}; Gemini failed: ${formatAIError(geminiError)}` })
-        }
-      }
       if (isAIAuthError(grokError)) {
         return res.json({ text: createFallbackAIResponse(fullPrompt), engine: 'Fallback' })
       }
       return res.status(500).json({ error: `Grok failed: ${grokMessage}` })
     }
   }
+
+  // Grok is not configured.
 
   const fallbackText = createFallbackAIResponse(fullPrompt)
   return res.json({ text: fallbackText, engine: 'Fallback' })
@@ -894,11 +812,11 @@ app.get('/api/health', (req, res) => {
       ssl: true,
       patterns: true,
     },
-    ai: { grok: !!GROK_KEY, gemini: !!GEMINI_KEY },
+    ai: { grok: !!GROK_KEY },
   })
 })
 
-app.post('/api/scan', rateLimit, requireAuth, async (req, res) => {
+app.post('/api/scan', rateLimit, async (req, res) => {
   const { target } = req.body || {}
   if (!target) return res.status(400).json({ error: 'Missing target URL' })
   if (!validateTarget(target)) return res.status(400).json({ error: 'Invalid URL format' })
@@ -911,23 +829,24 @@ app.post('/api/scan', rateLimit, requireAuth, async (req, res) => {
   }
 })
 
-app.get('/api/history', requireAuth, async (req, res) => res.json(await loadHistory()))
+app.get('/api/history', async (req, res) => res.json(await loadHistory()))
 
-app.post('/api/history', requireAuth, async (req, res) => {
+app.post('/api/history', async (req, res) => {
   const scan = req.body
   if (!scan?.id) return res.status(400).json({ error: 'Invalid payload' })
   const h = await loadHistory()
+  if (h.some(i => i.id === scan.id)) return res.status(200).json({ success: true, duplicate: true })
   h.unshift(scan)
   await saveHistory(h.slice(0, 100))
   res.status(201).json({ success: true })
 })
 
-app.delete('/api/history', requireAuth, async (req, res) => {
+app.delete('/api/history', async (req, res) => {
   await saveHistory([])
   res.json({ success: true })
 })
 
-app.delete('/api/history/:id', requireAuth, async (req, res) => {
+app.delete('/api/history/:id', async (req, res) => {
   const h = await loadHistory()
   await saveHistory(h.filter(i => i.id !== req.params.id))
   res.json({ success: true })
@@ -940,5 +859,5 @@ app.listen(PORT, () => {
   console.log(`   VirusTotal: ${VT_KEY ? '✓' : '✗ (add VIRUSTOTAL_API_KEY to .env)'}`)
   console.log(`   URLScan.io: ${URLSCAN_KEY ? '✓' : '✗ (add URLSCAN_API_KEY to .env)'}`)
   console.log(`   Google Safe Browsing: ${GSB_KEY ? '✓' : '✗ (add GOOGLE_SAFE_BROWSING_API_KEY to .env)'}`)
-  console.log(`   AI: Grok ${GROK_KEY ? '✓' : '✗'} | Gemini ${GEMINI_KEY ? '✓' : '✗'}\n`)
+  console.log(`   AI: Grok ${GROK_KEY ? '✓' : '✗'}\n`)
 })

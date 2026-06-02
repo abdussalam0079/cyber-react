@@ -5,7 +5,7 @@ export const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemi
 
 export function loadAIConfig() {
   return {
-    engine:      localStorage.getItem('cs_engine')       || 'dual',
+    engine:      localStorage.getItem('cs_engine')       || 'grok',
     grokModel:   localStorage.getItem('cs_grok_model')   || 'grok-3-mini',
     geminiModel: localStorage.getItem('cs_gemini_model') || 'gemini-2.0-flash',
   }
@@ -18,10 +18,7 @@ export function saveAIConfig(cfg) {
 }
 
 export async function callAI(prompt, { preferGemini = false } = {}) {
-  const cfg = loadAIConfig()
-  const engine = cfg.engine === 'gemini' ? 'gemini'
-               : cfg.engine === 'dual' && preferGemini ? 'gemini'
-               : 'grok'
+  const engine = 'grok'
 
   const res = await fetch('/api/ai/chat', {
     method: 'POST',

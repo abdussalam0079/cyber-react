@@ -1,32 +1,35 @@
-import { useEffect, useState } from 'react'
-import { useNavigate, useOutletContext } from 'react-router-dom'
-import { Eye, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Eye, Trash2, Clock, Shield, AlertTriangle } from 'lucide-react'
+import { gsap } from 'gsap'
 import { getHistory, clearHistory, deleteHistoryItem } from '../utils/scanner'
 import styles from './HistoryPage.module.css'
 
 export default function HistoryPage() {
   const navigate = useNavigate()
-  const { user, authReady } = useOutletContext()
   const [history, setHistory] = useState([])
   const [confirmClear, setConfirmClear] = useState(false)
+  const pageRef  = useRef(null)
+  const itemRefs = useRef([])
 
   useEffect(() => {
-    if (authReady && !user) {
-      navigate('/login')
-      return
-    }
-
     async function load() {
-      setHistory(await getHistory())
+      const h = await getHistory()
+      setHistory(h)
+      setTimeout(() => {
+        if (itemRefs.current.length)
+          gsap.fromTo(itemRefs.current.filter(Boolean),
+            { opacity: 0, x: -24 },
+            { opacity: 1, x: 0, duration: 0.5, stagger: 0.07, ease: 'power3.out' }
+          )
+      }, 50)
     }
-    if (user) load()
-  }, [authReady, user, navigate])
+    gsap.fromTo(pageRef.current, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out' })
+    load()
+  }, [])
 
   const handleClear = async () => {
-    if (!confirmClear) {
-      setConfirmClear(true)
-      return
-    }
+    if (!confirmClear) { setConfirmClear(true); return }
     await clearHistory()
     setHistory([])
     setConfirmClear(false)
@@ -34,22 +37,24 @@ export default function HistoryPage() {
 
   const handleDelete = async (id, e) => {
     e.stopPropagation()
+    const el = itemRefs.current.find((r, i) => history[i]?.id === id)
+    if (el) {
+      await new Promise(resolve =>
+        gsap.to(el, { opacity: 0, x: 40, height: 0, marginBottom: 0, padding: 0, duration: 0.35, ease: 'power2.in', onComplete: resolve })
+      )
+    }
     await deleteHistoryItem(id)
     setHistory(await getHistory())
   }
 
-  const getSeverityIcon = (severity) => {
-    const icons = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢' }
-    return icons[severity] || '⚪'
-  }
-
   return (
-    <div className={styles.page}>
+    <div ref={pageRef} className={styles.page}>
       <div className={styles.container}>
         <div className={styles.header}>
           <div>
-            <h1 className={styles.title}>Scan History</h1>
-            <p className={styles.subtitle}>View and manage your previous security scans.</p>
+            <div className={styles.headerBadge}><Clock size={13}/> SCAN HISTORY</div>
+            <h1 className={styles.title}>Previous Scans</h1>
+            <p className={styles.subtitle}>Click any scan to view the full threat report.</p>
           </div>
         </div>
 
@@ -76,9 +81,10 @@ export default function HistoryPage() {
             </div>
 
             <div className={styles.history}>
-              {history.map((scan) => (
+              {history.map((scan, i) => (
                 <div
                   key={scan.id}
+                  ref={el => itemRefs.current[i] = el}
                   className={styles.item}
                   onClick={() => navigate('/results', { state: { scan } })}
                 >
@@ -88,7 +94,7 @@ export default function HistoryPage() {
                     </div>
                     <div className={styles.itemTarget}>{scan.target}</div>
                     <div className={styles.itemStats}>
-                      {scan.summary.critical > 0 && (
+                      {(scan.summary?.critical ?? 0) > 0 && (
                         <div className={styles.stat}>
                           <span>🔴</span>
                           <span className={styles.statLabel}>Critical:</span>
@@ -97,7 +103,7 @@ export default function HistoryPage() {
                           </span>
                         </div>
                       )}
-                      {scan.summary.high > 0 && (
+                      {(scan.summary?.high ?? 0) > 0 && (
                         <div className={styles.stat}>
                           <span>🟠</span>
                           <span className={styles.statLabel}>High:</span>
@@ -106,7 +112,7 @@ export default function HistoryPage() {
                           </span>
                         </div>
                       )}
-                      {scan.summary.medium > 0 && (
+                      {(scan.summary?.medium ?? 0) > 0 && (
                         <div className={styles.stat}>
                           <span>🟡</span>
                           <span className={styles.statLabel}>Medium:</span>
@@ -115,7 +121,7 @@ export default function HistoryPage() {
                           </span>
                         </div>
                       )}
-                      {scan.summary.low > 0 && (
+                      {(scan.summary?.low ?? 0) > 0 && (
                         <div className={styles.stat}>
                           <span>🟢</span>
                           <span className={styles.statLabel}>Low:</span>
@@ -124,7 +130,7 @@ export default function HistoryPage() {
                           </span>
                         </div>
                       )}
-                      {scan.threats.length === 0 && (
+                      {(scan.threats?.length ?? 0) === 0 && (
                         <div className={styles.stat}>
                           <span>✅</span>
                           <span className={styles.statLabel}>Status:</span>

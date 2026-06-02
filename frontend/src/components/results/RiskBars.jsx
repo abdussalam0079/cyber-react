@@ -1,29 +1,39 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
+import { gsap } from 'gsap'
 import styles from './RiskBars.module.css'
 
 const BARS = (score) => [
-  { label: 'ATTACK COMPLEXITY', value: 40 + score * 4,   color: 'var(--blue)'   },
-  { label: 'EXPLOITABILITY',    value: 55 + score * 4.2, color: 'var(--orange)' },
-  { label: 'IMPACT SCOPE',      value: 45 + score * 5,   color: 'var(--red)'    },
-  { label: 'PATCH PRIORITY',    value: score * 10,        color: 'var(--neon)'   },
+  { label: 'ATTACK COMPLEXITY', value: Math.min(40 + score * 4,   98), color: '#38bdf8' },
+  { label: 'EXPLOITABILITY',    value: Math.min(55 + score * 4.2, 98), color: '#f97316' },
+  { label: 'IMPACT SCOPE',      value: Math.min(45 + score * 5,   98), color: '#fb7185' },
+  { label: 'PATCH PRIORITY',    value: Math.min(score * 10,        98), color: '#22d3ee' },
 ]
 
 export default function RiskBars({ score }) {
-  const [animated, setAnimated] = useState(false)
-  const ref = useRef(null)
+  const fillRefs = useRef([])
+  const wrapRef  = useRef(null)
 
   useEffect(() => {
-    const t = setTimeout(() => setAnimated(true), 200)
-    return () => clearTimeout(t)
-  }, [])
+    const fills = fillRefs.current.filter(Boolean)
+    const bars  = BARS(score)
 
-  const bars = BARS(score).map(b => ({ ...b, value: Math.min(b.value, 98) }))
+    gsap.fromTo(fills,
+      { width: '0%' },
+      {
+        width: (i) => `${bars[i]?.value ?? 0}%`,
+        duration: 1.2,
+        ease: 'power3.out',
+        stagger: 0.12,
+        delay: 0.4,
+      }
+    )
+  }, [score])
 
   return (
-    <div className={styles.wrap} ref={ref}>
+    <div className={styles.wrap} ref={wrapRef}>
       <div className={styles.heading}>RISK BREAKDOWN</div>
       <div className={styles.bars}>
-        {bars.map((b, i) => (
+        {BARS(score).map((b, i) => (
           <div key={b.label} className={styles.bar}>
             <div className={styles.barHeader}>
               <span className={styles.barLabel}>{b.label}</span>
@@ -33,12 +43,12 @@ export default function RiskBars({ score }) {
             </div>
             <div className={styles.track}>
               <div
+                ref={el => fillRefs.current[i] = el}
                 className={styles.fill}
                 style={{
-                  background: b.color,
-                  width: animated ? `${b.value}%` : '0%',
-                  transitionDelay: `${i * 0.1}s`,
-                  boxShadow: `0 0 10px ${b.color}55`,
+                  background: `linear-gradient(90deg, ${b.color}99, ${b.color})`,
+                  boxShadow: `0 0 8px ${b.color}66`,
+                  width: '0%',
                 }}
               />
             </div>
